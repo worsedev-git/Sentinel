@@ -1,4 +1,4 @@
-const { createCanvas } = require("canvas");
+const { createCanvas } = require("@napi-rs/canvas");
 const GIFEncoder = require("gifencoder");
 const axios = require("axios");
 const FormData = require("form-data");
@@ -19,7 +19,7 @@ function getLikelihood(score) {
 	return "UNLIKELY";
 }
 
-function hexColor({ r, g, b }) {
+function rgb({ r, g, b }) {
 	return `rgb(${r},${g},${b})`;
 }
 
@@ -28,8 +28,8 @@ function drawFrame(ctx, W, H, score, animScore, color) {
 	ctx.fillStyle = "#16161a";
 	ctx.fillRect(0, 0, W, H);
 
-	const cx = W / 2;
-	const cy = H / 2 - 10;
+	const cx     = W / 2;
+	const cy     = H / 2 - 10;
 	const radius = 90;
 	const lineW  = 12;
 
@@ -39,21 +39,21 @@ function drawFrame(ctx, W, H, score, animScore, color) {
 	ctx.arc(cx, cy, radius, 0, Math.PI * 2);
 	ctx.stroke();
 
-	const startAngle = -Math.PI / 2;
-	const endAngle   = startAngle + (Math.PI * 2 * (animScore / 100));
+	if (animScore > 0) {
+		const startAngle = -Math.PI / 2;
+		const endAngle   = startAngle + (Math.PI * 2 * (animScore / 100));
+		const grad       = ctx.createLinearGradient(cx - radius, cy, cx + radius, cy);
+		grad.addColorStop(0, rgb(color));
+		grad.addColorStop(1, `rgb(${Math.min(color.r+60,255)},${Math.min(color.g+60,255)},${Math.min(color.b+60,255)})`);
+		ctx.strokeStyle = grad;
+		ctx.lineWidth   = lineW;
+		ctx.lineCap     = "round";
+		ctx.beginPath();
+		ctx.arc(cx, cy, radius, startAngle, endAngle);
+		ctx.stroke();
+	}
 
-	const grad = ctx.createLinearGradient(cx - radius, cy, cx + radius, cy);
-	grad.addColorStop(0, hexColor(color));
-	grad.addColorStop(1, `rgb(${Math.min(color.r + 60, 255)},${Math.min(color.g + 60, 255)},${Math.min(color.b + 60, 255)})`);
-
-	ctx.strokeStyle = grad;
-	ctx.lineWidth   = lineW;
-	ctx.lineCap     = "round";
-	ctx.beginPath();
-	ctx.arc(cx, cy, radius, startAngle, endAngle);
-	ctx.stroke();
-
-	ctx.fillStyle    = hexColor(color);
+	ctx.fillStyle    = rgb(color);
 	ctx.font         = "bold 48px sans-serif";
 	ctx.textAlign    = "center";
 	ctx.textBaseline = "middle";
@@ -61,11 +61,9 @@ function drawFrame(ctx, W, H, score, animScore, color) {
 
 	ctx.fillStyle    = "#aaaabb";
 	ctx.font         = "14px sans-serif";
-	ctx.textAlign    = "center";
-	ctx.textBaseline = "middle";
 	ctx.fillText("SUSPICION SCORE", cx, cy + 56);
 
-	ctx.fillStyle = hexColor(color);
+	ctx.fillStyle = rgb(color);
 	ctx.font      = "bold 16px sans-serif";
 	ctx.fillText(getLikelihood(score), cx, cy + 80);
 
@@ -95,13 +93,11 @@ function drawStats(ctx, W, H, data) {
 	stats.forEach(([label, value], i) => {
 		const x = i % 2 === 0 ? col1 : col2;
 		const y = startY + Math.floor(i / 2) * lineH;
-
 		ctx.fillStyle    = "#666677";
 		ctx.font         = "11px sans-serif";
 		ctx.textAlign    = "left";
 		ctx.textBaseline = "top";
 		ctx.fillText(label.toUpperCase(), x, y);
-
 		ctx.fillStyle = "#ddddee";
 		ctx.font      = "bold 13px sans-serif";
 		ctx.fillText(value, x, y + 13);
@@ -111,7 +107,6 @@ function drawStats(ctx, W, H, data) {
 	ctx.fillStyle = "#666677";
 	ctx.font      = "11px sans-serif";
 	ctx.fillText("VIOLATIONS", col1, violY);
-
 	ctx.fillStyle = "#ddddee";
 	ctx.font      = "12px sans-serif";
 	const lines   = (data.violations || "None this session").split("\n").slice(0, 3);
@@ -133,28 +128,27 @@ function generateGIF(data) {
 		const encoder = new GIFEncoder(W, H);
 		const chunks  = [];
 
-		encoder.createReadStream().on("data",  chunk => chunks.push(chunk));
-		encoder.createReadStream().on("end",   ()    => resolve(Buffer.concat(chunks)));
+		encoder.createReadStream().on("data",  c  => chunks.push(c));
+		encoder.createReadStream().on("end",   ()  => resolve(Buffer.concat(chunks)));
 		encoder.createReadStream().on("error", reject);
 
 		encoder.start();
 		encoder.setRepeat(0);
-		encoder.setDelay(16);
+		encoder.setDelay(20);
 		encoder.setQuality(5);
 
 		const canvas = createCanvas(W, H);
 		const ctx    = canvas.getContext("2d");
 		const color  = getColor(data.score);
 
-		const totalFrames = 50;
-		for (let f = 0; f <= totalFrames; f++) {
-			const animScore = data.score * (f / totalFrames);
+		for (let f = 0; f <= 50; f++) {
+			const animScore = data.score * (f / 50);
 			drawFrame(ctx, W, H, data.score, animScore, color);
-			if (f === totalFrames) drawStats(ctx, W, H, data);
+			if (f === 50) drawStats(ctx, W, H, data);
 			encoder.addFrame(ctx);
 		}
 
-		for (let f = 0; f < 30; f++) {
+		for (let f = 0; f < 40; f++) {
 			drawFrame(ctx, W, H, data.score, data.score, color);
 			drawStats(ctx, W, H, data);
 			encoder.addFrame(ctx);
@@ -165,18 +159,17 @@ function generateGIF(data) {
 }
 
 async function sendToDiscord(gifBuffer, data) {
-	const color      = getColor(data.score);
-	const likelihood = getLikelihood(data.score);
-	const colorHex   = (color.r << 16) | (color.g << 8) | color.b;
+	const color    = getColor(data.score);
+	const colorHex = (color.r << 16) | (color.g << 8) | color.b;
+	const form     = new FormData();
 
-	const form    = new FormData();
 	const payload = {
 		embeds: [{
 			title:       `[SUSPICION REPORT] ${data.username}`,
-			description: `Cheater Likelihood: **${likelihood}**`,
+			description: `Cheater Likelihood: **${getLikelihood(data.score)}**`,
 			color:       colorHex,
 			fields: [
-				{ name: "Score Breakdown", value: data.breakdown || "No signals",   inline: false },
+				{ name: "Score Breakdown", value: data.breakdown || "No signals recorded", inline: false },
 				{ name: "Profile",         value: `https://www.roblox.com/users/${data.userId}/profile`, inline: false },
 			],
 			image:     { url: "attachment://report.gif" },
