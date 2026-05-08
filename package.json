@@ -9,6 +9,6 @@
     "gifencoder": "^2.0.1"
   },
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   }
 }
