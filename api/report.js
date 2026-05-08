@@ -1,5 +1,5 @@
 const { createCanvas } = require("@napi-rs/canvas");
-const GIFEncoder = require("gifencoder");
+const GIFEncoder = require("gif-encoder-2");
 const axios = require("axios");
 const FormData = require("form-data");
 
@@ -120,42 +120,33 @@ function drawStats(ctx, W, H, data) {
 	ctx.fillText("Sentinel Security  •  Statistical Anti-Cheat", W / 2, H - 14);
 }
 
-function generateGIF(data) {
-	return new Promise((resolve, reject) => {
-		const W = 360;
-		const H = 420;
+async function generateGIF(data) {
+	const W      = 360;
+	const H      = 420;
+	const canvas = createCanvas(W, H);
+	const ctx    = canvas.getContext("2d");
+	const color  = getColor(data.score);
 
-		const encoder = new GIFEncoder(W, H);
-		const chunks  = [];
+	const encoder = new GIFEncoder(W, H, "neuquant", true);
+	encoder.setDelay(20);
+	encoder.setRepeat(0);
+	encoder.start();
 
-		encoder.createReadStream().on("data",  c  => chunks.push(c));
-		encoder.createReadStream().on("end",   ()  => resolve(Buffer.concat(chunks)));
-		encoder.createReadStream().on("error", reject);
+	for (let f = 0; f <= 50; f++) {
+		const animScore = data.score * (f / 50);
+		drawFrame(ctx, W, H, data.score, animScore, color);
+		if (f === 50) drawStats(ctx, W, H, data);
+		encoder.addFrame(ctx);
+	}
 
-		encoder.start();
-		encoder.setRepeat(0);
-		encoder.setDelay(20);
-		encoder.setQuality(5);
+	for (let f = 0; f < 40; f++) {
+		drawFrame(ctx, W, H, data.score, data.score, color);
+		drawStats(ctx, W, H, data);
+		encoder.addFrame(ctx);
+	}
 
-		const canvas = createCanvas(W, H);
-		const ctx    = canvas.getContext("2d");
-		const color  = getColor(data.score);
-
-		for (let f = 0; f <= 50; f++) {
-			const animScore = data.score * (f / 50);
-			drawFrame(ctx, W, H, data.score, animScore, color);
-			if (f === 50) drawStats(ctx, W, H, data);
-			encoder.addFrame(ctx);
-		}
-
-		for (let f = 0; f < 40; f++) {
-			drawFrame(ctx, W, H, data.score, data.score, color);
-			drawStats(ctx, W, H, data);
-			encoder.addFrame(ctx);
-		}
-
-		encoder.finish();
-	});
+	encoder.finish();
+	return encoder.out.getData();
 }
 
 async function sendToDiscord(gifBuffer, data) {
